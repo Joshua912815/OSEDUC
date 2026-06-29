@@ -183,7 +183,7 @@ mod tests {
     fn openai_compatible_requires_model() {
         let error = LlmConfig::from_getter(getter(&[
             ("OSEDUC_LLM_PROVIDER", "openai_compatible"),
-            ("OSEDUC_LLM_API_KEY", "secret-key-value"),
+            ("OSEDUC_LLM_API_KEY", "token"),
         ]))
         .expect_err("missing model should fail");
 
@@ -192,11 +192,11 @@ mod tests {
 
     #[test]
     fn secret_debug_and_display_are_redacted() {
-        let secret = SecretString::new("secret-key-value");
+        let secret = SecretString::new("token");
 
         assert_eq!(format!("{secret:?}"), "<redacted>");
         assert_eq!(secret.to_string(), "<redacted>");
-        assert!(!format!("{secret:?}").contains("secret-key-value"));
+        assert!(!format!("{secret:?}").contains("token"));
     }
 
     #[test]
@@ -204,13 +204,13 @@ mod tests {
         let config = LlmConfig::from_getter(getter(&[
             ("OSEDUC_LLM_PROVIDER", "openai_compatible"),
             ("OSEDUC_LLM_MODEL", "example-model"),
-            ("OSEDUC_LLM_API_KEY", "secret-key-value"),
+            ("OSEDUC_LLM_API_KEY", "token"),
         ]))
         .expect("config should load");
 
         let debug = format!("{config:?}");
         assert!(debug.contains("<redacted>"));
-        assert!(!debug.contains("secret-key-value"));
+        assert!(!debug.contains("token"));
     }
 
     #[test]

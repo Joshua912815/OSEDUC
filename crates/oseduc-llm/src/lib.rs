@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
 mod config;
+mod provider;
 
 pub use config::{ConfigError, LlmConfig, LlmProviderKind, SecretString};
+pub use provider::{LlmError, LlmGateway, LlmProvider, MockLlmProvider, OpenAiCompatibleProvider};
 
 pub fn crate_name() -> &'static str {
     "oseduc-llm"
