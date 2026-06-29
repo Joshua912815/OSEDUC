@@ -149,7 +149,25 @@ async fn tutor_chat(
     State(state): State<AppState>,
     Json(request): Json<TutorChatRequest>,
 ) -> Result<Json<TutorResponse>, AppError> {
-    let response = state.gateway.chat(request).await?;
+    let context_chunks = match state
+        .knowledge
+        .tutor_context_for_node_ids(&request.knowledge_node_ids)
+        .await
+    {
+        Ok(context_chunks) => context_chunks,
+        Err(StoreError::NotFound(id)) => {
+            return Err(AppError::new(
+                StatusCode::NOT_FOUND,
+                "knowledge_context_missing",
+                format!("knowledge context not found for node {id}"),
+            ));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let response = state
+        .gateway
+        .chat_with_context(request, context_chunks)
+        .await?;
     Ok(Json(response))
 }
 
@@ -316,6 +334,9 @@ mod tests {
             &self,
             node_ids: &[String],
         ) -> Result<Vec<TutorContextChunk>, StoreError> {
+            if node_ids.is_empty() {
+                return Ok(Vec::new());
+            }
             if node_ids.iter().all(|node_id| node_id == &sample_node().id) {
                 Ok(vec![TutorContextChunk {
                     node_id: sample_node().id,
@@ -547,8 +568,8 @@ mod tests {
     async fn tutor_chat_uses_mock_gateway() {
         let app = build_router(test_state());
         let body = serde_json::json!({
-            "message": "Explain trap handling",
-            "knowledge_node_ids": ["trap"]
+            "message": "Explain address spaces",
+            "knowledge_node_ids": ["ch4-address-space"]
         });
 
         let response = app
@@ -570,6 +591,38 @@ mod tests {
         let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
 
         assert!(body.contains("Mock tutor response"));
+        assert!(body.contains("rCore v3 ch4"));
         assert!(body.contains("mock_response"));
+        assert!(body.contains("source_grounded_context"));
+    }
+
+    #[tokio::test]
+    async fn tutor_chat_rejects_missing_knowledge_context() {
+        let app = build_router(test_state());
+        let body = serde_json::json!({
+            "message": "Explain a missing node",
+            "knowledge_node_ids": ["missing-node"]
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/v1/tutor/chat")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(body.contains("knowledge_context_missing"));
+        assert!(!body.contains("Address-space context"));
     }
 }

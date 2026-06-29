@@ -1,7 +1,7 @@
 use std::{fmt, sync::Arc};
 
 use async_trait::async_trait;
-use oseduc_core::{SafetyFlag, TutorChatRequest, TutorResponse};
+use oseduc_core::{SafetyFlag, TutorChatPrompt, TutorChatRequest, TutorResponse};
 
 use crate::{LlmConfig, LlmProviderKind, SecretString};
 
@@ -9,7 +9,7 @@ use crate::{LlmConfig, LlmProviderKind, SecretString};
 pub trait LlmProvider: Send + Sync {
     fn name(&self) -> &'static str;
 
-    async fn chat(&self, request: TutorChatRequest) -> Result<TutorResponse, LlmError>;
+    async fn chat(&self, prompt: TutorChatPrompt) -> Result<TutorResponse, LlmError>;
 }
 
 #[derive(Clone)]
@@ -40,7 +40,17 @@ impl LlmGateway {
     }
 
     pub async fn chat(&self, request: TutorChatRequest) -> Result<TutorResponse, LlmError> {
-        self.provider.chat(request).await
+        self.chat_with_context(request, Vec::new()).await
+    }
+
+    pub async fn chat_with_context(
+        &self,
+        request: TutorChatRequest,
+        context_chunks: Vec<oseduc_core::TutorContextChunk>,
+    ) -> Result<TutorResponse, LlmError> {
+        self.provider
+            .chat(TutorChatPrompt::new(request, context_chunks))
+            .await
     }
 }
 
@@ -59,12 +69,18 @@ impl LlmProvider for MockLlmProvider {
         "mock"
     }
 
-    async fn chat(&self, request: TutorChatRequest) -> Result<TutorResponse, LlmError> {
+    async fn chat(&self, prompt: TutorChatPrompt) -> Result<TutorResponse, LlmError> {
         let mut response = TutorResponse::mock(format!(
             "Mock tutor response for: {}",
-            request.message.trim()
+            prompt.request.message.trim()
         ));
         response.provider = self.name().to_owned();
+        response.citations = prompt.citations();
+        if !response.citations.is_empty() {
+            response
+                .safety_flags
+                .push(SafetyFlag::SourceGroundedContext);
+        }
         Ok(response)
     }
 }
@@ -99,17 +115,21 @@ impl OpenAiCompatibleProvider {
         )
     }
 
-    fn request_body(&self, request: &TutorChatRequest) -> serde_json::Value {
+    fn request_body(&self, prompt: &TutorChatPrompt) -> serde_json::Value {
         serde_json::json!({
             "model": self.config.model,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are OSeduc's controlled OS teaching tutor. Give concise, source-aware guidance and avoid providing complete assignment solutions."
+                    "content": SYSTEM_PROMPT
+                },
+                {
+                    "role": "system",
+                    "content": format_reference_context(prompt)
                 },
                 {
                     "role": "user",
-                    "content": request.message
+                    "content": prompt.request.message
                 }
             ],
             "temperature": 0.2
@@ -123,7 +143,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         "openai_compatible"
     }
 
-    async fn chat(&self, request: TutorChatRequest) -> Result<TutorResponse, LlmError> {
+    async fn chat(&self, prompt: TutorChatPrompt) -> Result<TutorResponse, LlmError> {
         let api_key = self
             .config
             .api_key
@@ -136,7 +156,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
                 reqwest::header::AUTHORIZATION,
                 authorization_header(api_key)?,
             )
-            .json(&self.request_body(&request))
+            .json(&self.request_body(&prompt))
             .send()
             .await
             .map_err(|error| LlmError::ProviderRequest(error.to_string()))?;
@@ -156,13 +176,46 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .filter(|content| !content.is_empty())
             .ok_or(LlmError::EmptyResponse)?;
 
+        let citations = prompt.citations();
+        let safety_flags = if citations.is_empty() {
+            vec![SafetyFlag::MissingCitation]
+        } else {
+            vec![SafetyFlag::SourceGroundedContext]
+        };
+
         Ok(TutorResponse {
             answer,
             provider: self.name().to_owned(),
-            citations: Vec::new(),
-            safety_flags: vec![SafetyFlag::MissingCitation],
+            citations,
+            safety_flags,
         })
     }
+}
+
+const SYSTEM_PROMPT: &str = "You are OSeduc's controlled operating-system teaching tutor. Use the provided rCore reference context as the source of truth for knowledge explanations. Explain in your own words, cite the provided citation labels, and say when the context is insufficient. Do not provide complete assignment solutions or present source-derived material as OSeduc-original text.";
+
+fn format_reference_context(prompt: &TutorChatPrompt) -> String {
+    if prompt.context_chunks.is_empty() {
+        return "No source-grounded reference context was provided for this request.".to_owned();
+    }
+
+    prompt
+        .context_chunks
+        .iter()
+        .map(|chunk| {
+            format!(
+                "[{}]\nNode: {} ({})\nSource: {} <{}>\nLicense/provenance: {}\nTeaching context:\n{}",
+                chunk.citation_label,
+                chunk.node_title,
+                chunk.node_id,
+                chunk.source_title,
+                chunk.source_url,
+                chunk.license_note,
+                chunk.teaching_context
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 #[derive(serde::Deserialize)]
@@ -233,17 +286,42 @@ mod tests {
     async fn mock_provider_returns_stable_response() {
         let provider = MockLlmProvider::new();
         let response = provider
-            .chat(TutorChatRequest {
-                message: "explain traps".to_owned(),
-                student_id: None,
-                knowledge_node_ids: Vec::new(),
-            })
+            .chat(TutorChatPrompt::new(
+                TutorChatRequest {
+                    message: "explain traps".to_owned(),
+                    student_id: None,
+                    knowledge_node_ids: Vec::new(),
+                },
+                Vec::new(),
+            ))
             .await
             .expect("mock provider should respond");
 
         assert_eq!(response.provider, "mock");
         assert!(response.answer.contains("explain traps"));
         assert_eq!(response.safety_flags, vec![SafetyFlag::MockResponse]);
+    }
+
+    #[tokio::test]
+    async fn mock_provider_returns_context_citations() {
+        let provider = MockLlmProvider::new();
+        let response = provider
+            .chat(TutorChatPrompt::new(
+                TutorChatRequest {
+                    message: "explain address spaces".to_owned(),
+                    student_id: None,
+                    knowledge_node_ids: vec!["ch4-address-space".to_owned()],
+                },
+                vec![sample_context_chunk()],
+            ))
+            .await
+            .expect("mock provider should respond");
+
+        assert_eq!(response.citations.len(), 1);
+        assert_eq!(response.citations[0].label, "rCore v3 ch4");
+        assert!(response
+            .safety_flags
+            .contains(&SafetyFlag::SourceGroundedContext));
     }
 
     #[test]
@@ -282,13 +360,37 @@ mod tests {
             timeout: std::time::Duration::from_secs(5),
         };
         let provider = OpenAiCompatibleProvider::new(config).expect("config should be valid");
-        let body = provider.request_body(&TutorChatRequest {
-            message: "what is fork?".to_owned(),
-            student_id: None,
-            knowledge_node_ids: Vec::new(),
-        });
+        let body = provider.request_body(&TutorChatPrompt::new(
+            TutorChatRequest {
+                message: "what is fork?".to_owned(),
+                student_id: None,
+                knowledge_node_ids: Vec::new(),
+            },
+            vec![sample_context_chunk()],
+        ));
 
         assert_eq!(body["model"], "example-model");
-        assert_eq!(body["messages"][1]["content"], "what is fork?");
+        assert!(body["messages"][0]["content"]
+            .as_str()
+            .expect("system prompt should be a string")
+            .contains("rCore reference context"));
+        assert!(body["messages"][1]["content"]
+            .as_str()
+            .expect("context prompt should be a string")
+            .contains("rCore v3 ch4"));
+        assert_eq!(body["messages"][2]["content"], "what is fork?");
+    }
+
+    fn sample_context_chunk() -> oseduc_core::TutorContextChunk {
+        oseduc_core::TutorContextChunk {
+            node_id: "ch4-address-space".to_owned(),
+            node_title: "Address Space".to_owned(),
+            source_id: "rcore-v3-ch4".to_owned(),
+            source_title: "rCore Chapter 4".to_owned(),
+            source_url: "https://rcore-os.cn/rCore-Tutorial-Book-v3/chapter4/index.html".to_owned(),
+            license_note: "GPL-3.0; cite rCore".to_owned(),
+            teaching_context: "Address-space teaching context".to_owned(),
+            citation_label: "rCore v3 ch4".to_owned(),
+        }
     }
 }
