@@ -184,6 +184,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         };
 
         Ok(TutorResponse {
+            interaction_id: None,
             answer,
             provider: self.name().to_owned(),
             citations,

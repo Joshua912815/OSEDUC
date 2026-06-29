@@ -13,7 +13,10 @@ pub use student::{
     ProgressValidationError, RecordProgressRequest, StudentNodeProgress, StudentProfile,
     UpsertStudentProfileRequest,
 };
-pub use tutor::{Citation, SafetyFlag, TutorChatPrompt, TutorChatRequest, TutorResponse};
+pub use tutor::{
+    Citation, SafetyFlag, TutorChatPrompt, TutorChatRequest, TutorFeedbackDifficulty,
+    TutorFeedbackRequest, TutorInteraction, TutorInteractionFeedback, TutorResponse,
+};
 
 pub fn crate_name() -> &'static str {
     "oseduc-core"
