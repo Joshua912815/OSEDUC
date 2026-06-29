@@ -1,5 +1,11 @@
 #![forbid(unsafe_code)]
 
+mod config;
+mod router;
+
+pub use config::{ApiConfig, ApiConfigError, PublicConfig};
+pub use router::{build_router, AppState};
+
 pub fn crate_name() -> &'static str {
     "oseduc-api"
 }

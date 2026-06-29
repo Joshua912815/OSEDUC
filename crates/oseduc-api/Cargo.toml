@@ -7,9 +7,15 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+axum = { workspace = true }
 oseduc-core = { path = "../oseduc-core" }
 oseduc-llm = { path = "../oseduc-llm" }
+serde = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tower = { workspace = true }
 
 [lints]
 workspace = true
-
