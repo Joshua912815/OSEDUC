@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - ci-smoke-tests
+      - "codex/**"
+
+env:
+  CARGO_TERM_COLOR: always
+  OSEDUC_DATABASE_URL: postgres://oseduc:oseduc_dev_password@127.0.0.1:5432/oseduc_ci_smoke
+  OSEDUC_ADMIN_TOKEN: ci-admin-token
+
+jobs:
+  rust:
+    name: Rust tests and backend smoke
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: oseduc
+          POSTGRES_USER: oseduc
+          POSTGRES_PASSWORD: oseduc_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oseduc -d oseduc"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run unit tests
+        run: cargo test
+
+      - name: Check committed secret patterns
+        run: |
+          openai_prefix='sk-'
+          admin_var='OSEDUC_ADMIN_TOKEN'
+          pattern="${openai_prefix}[A-Za-z0-9_-]{20,}|OSEDUC_LLM_API_KEY=${openai_prefix}|${admin_var}=[A-Za-z0-9_-]{20,}"
+          if git grep -nE "${pattern}" -- ':!README.md' ':!.env.example'; then
+            echo "Potential committed secret found" >&2
+            exit 1
+          fi
+
+      - name: Run backend smoke test
+        run: scripts/smoke_backend.sh
