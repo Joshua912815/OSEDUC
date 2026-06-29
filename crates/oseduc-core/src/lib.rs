@@ -1,11 +1,17 @@
 #![forbid(unsafe_code)]
 
 mod knowledge;
+mod student;
 mod tutor;
 
 pub use knowledge::{
     KnowledgeEdge, KnowledgeEdgeDirection, KnowledgeNeighbor, KnowledgeNode, KnowledgeNodeDetail,
     RetrievalChunk, SourceReference, TutorContextChunk,
+};
+pub use student::{
+    LearningDepth, LearningPath, LearningPathRecommendation, ProgressStatus,
+    ProgressValidationError, RecordProgressRequest, StudentNodeProgress, StudentProfile,
+    UpsertStudentProfileRequest,
 };
 pub use tutor::{Citation, SafetyFlag, TutorChatPrompt, TutorChatRequest, TutorResponse};
 
