@@ -9,3 +9,8 @@ fm-agent-tgrcore-reproduction/
 
 # Rust build artifacts.
 target/
+
+# Local runtime configuration and secrets.
+.env
+.env.local
+.env.*.local
