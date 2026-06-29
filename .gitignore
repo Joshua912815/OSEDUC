@@ -7,3 +7,5 @@ fm-agent-tgrcore-reproduction/
 # Backup of interrupted/partial reference clone attempts.
 .reference-copy-backup-from-slow-clone/
 
+# Rust build artifacts.
+target/

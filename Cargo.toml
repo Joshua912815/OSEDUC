@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "crates/oseduc-api",
+    "crates/oseduc-core",
+    "crates/oseduc-llm",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Joshua912815/OSEDUC"
+rust-version = "1.80"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
