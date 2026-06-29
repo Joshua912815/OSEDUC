@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OSeduc Learning Console</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>OSeduc Learning Console</h1>
+          <p id="apiStatus" class="status-line">Connecting to backend...</p>
+        </div>
+        <div class="topbar-actions">
+          <label class="compact-field">
+            <span>Student</span>
+            <input id="studentIdInput" value="student-demo" autocomplete="off" />
+          </label>
+          <button id="refreshButton" class="button primary" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar">
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>Rust OS Mainline</h2>
+              <span id="nodeCount" class="meta-text">0 nodes</span>
+            </div>
+            <div id="nodeList" class="node-list"></div>
+          </section>
+
+          <section class="panel admin-panel">
+            <div class="panel-heading">
+              <h2>Seed</h2>
+              <span class="meta-text">local admin</span>
+            </div>
+            <label class="field">
+              <span>Admin token</span>
+              <input id="adminTokenInput" type="password" autocomplete="off" />
+            </label>
+            <button id="seedButton" class="button secondary" type="button">Seed rCore Graph</button>
+            <p class="hint">Token is used only for this request and is not stored.</p>
+          </section>
+        </aside>
+
+        <section class="main-column">
+          <section class="panel map-panel">
+            <div class="panel-heading">
+              <h2>Learning Map</h2>
+              <span id="mapStatus" class="meta-text">No data</span>
+            </div>
+            <div id="learningMap" class="learning-map"></div>
+          </section>
+
+          <section class="panel detail-panel">
+            <div class="panel-heading">
+              <h2 id="nodeTitle">Select a knowledge node</h2>
+              <span id="nodeChapter" class="badge">chapter</span>
+            </div>
+            <p id="nodeSummary" class="summary-text">Load or seed the graph, then choose a node from the mainline.</p>
+            <div class="detail-grid">
+              <div>
+                <h3>Objectives</h3>
+                <ul id="objectivesList" class="clean-list"></ul>
+              </div>
+              <div>
+                <h3>Common Misconceptions</h3>
+                <ul id="misconceptionsList" class="clean-list"></ul>
+              </div>
+            </div>
+            <div id="sourceBox" class="source-box"></div>
+          </section>
+
+          <section class="panel profile-panel">
+            <div class="panel-heading">
+              <h2>Student Profile</h2>
+              <span id="profileStatus" class="meta-text">Not loaded</span>
+            </div>
+            <div class="form-grid">
+              <label class="field">
+                <span>Display name</span>
+                <input id="displayNameInput" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Depth</span>
+                <select id="depthSelect">
+                  <option value="brief">Brief</option>
+                  <option value="balanced" selected>Balanced</option>
+                  <option value="deep">Deep</option>
+                </select>
+              </label>
+              <label class="field wide">
+                <span>Learning goal</span>
+                <input id="goalInput" autocomplete="off" />
+              </label>
+            </div>
+            <button id="saveProfileButton" class="button secondary" type="button">Save Profile</button>
+          </section>
+        </section>
+
+        <aside class="right-rail">
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>Next Step</h2>
+              <span id="pathStatus" class="meta-text">No recommendation</span>
+            </div>
+            <div id="recommendationList" class="recommendation-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>Progress</h2>
+              <span id="progressStatus" class="meta-text">Not saved</span>
+            </div>
+            <label class="field">
+              <span>Status</span>
+              <select id="progressSelect">
+                <option value="not_started">Not started</option>
+                <option value="in_progress">In progress</option>
+                <option value="needs_review">Needs review</option>
+                <option value="mastered">Mastered</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Mastery score</span>
+              <input id="masteryInput" type="number" min="0" max="100" value="0" />
+            </label>
+            <label class="field">
+              <span>Notes</span>
+              <textarea id="progressNotesInput" rows="4"></textarea>
+            </label>
+            <button id="saveProgressButton" class="button primary" type="button">Save Progress</button>
+          </section>
+
+          <section class="panel tutor-panel">
+            <div class="panel-heading">
+              <h2>Tutor</h2>
+              <span id="tutorStatus" class="meta-text">Mock or live LLM</span>
+            </div>
+            <label class="field">
+              <span>Question</span>
+              <textarea id="questionInput" rows="4">解释这个知识点的核心思想。</textarea>
+            </label>
+            <button id="askTutorButton" class="button primary" type="button">Ask Tutor</button>
+            <div id="tutorAnswer" class="tutor-answer"></div>
+          </section>
+        </aside>
+      </main>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

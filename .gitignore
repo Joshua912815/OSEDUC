@@ -10,6 +10,10 @@ fm-agent-tgrcore-reproduction/
 # Rust build artifacts.
 target/
 
+# Frontend local artifacts.
+node_modules/
+npm-debug.log*
+
 # Local runtime configuration and secrets.
 .env
 .env.local

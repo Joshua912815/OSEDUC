@@ -239,3 +239,33 @@ Use these checks for the current codebase:
 cargo fmt --check
 cargo test
 ```
+
+## Frontend Learning Console
+
+The `frontend-learning-console` branch adds a lightweight static console under
+`frontend/learning-console`. It is intentionally separate from the Rust backend
+crates and uses no npm dependencies.
+
+Start the Rust API first, then run:
+
+```bash
+cd frontend/learning-console
+npm run dev
+```
+
+By default the console serves at `http://127.0.0.1:4173` and proxies `/api/*` to
+`http://127.0.0.1:3000`. Override these locally when needed:
+
+```bash
+OSEDUC_FRONTEND_HOST=127.0.0.1 OSEDUC_FRONTEND_PORT=4174 OSEDUC_API_BASE_URL=http://127.0.0.1:3100 npm run dev
+```
+
+The console currently supports:
+
+- Rust OS knowledge mainline navigation.
+- source/citation display for selected nodes.
+- student profile editing.
+- per-node progress recording.
+- learning-path recommendations.
+- source-grounded tutor chat.
+- admin seed calls with a local bearer token.
