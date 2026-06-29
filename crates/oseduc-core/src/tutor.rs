@@ -32,6 +32,7 @@ pub struct Citation {
 pub enum SafetyFlag {
     MockResponse,
     MissingCitation,
+    SourceGroundedContext,
     ProviderError,
     AcademicIntegrityBoundary,
 }
