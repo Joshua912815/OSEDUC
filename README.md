@@ -37,7 +37,9 @@ The first API surface is intentionally small but source-aware:
 - `GET /v1/students/{student_id}/progress`
 - `PUT /v1/students/{student_id}/progress/{node_id}`
 - `GET /v1/students/{student_id}/learning-path`
+- `GET /v1/students/{student_id}/tutor/interactions`
 - `POST /v1/tutor/chat`
+- `PUT /v1/tutor/interactions/{interaction_id}/feedback`
 
 ## Local Setup
 
@@ -110,6 +112,11 @@ deploy migrations. `OSEDUC_ENABLE_ADMIN_SEED` defaults to `false`; keep it off
 outside local development and controlled admin workflows. `OSEDUC_ADMIN_TOKEN`
 is required whenever `OSEDUC_ENABLE_ADMIN_SEED=true`.
 
+`OSEDUC_LOG_STUDENT_MESSAGES` defaults to `false`. In that mode, tutor
+interactions persist provider, knowledge-node IDs, citations, safety flags, and
+timestamps, but not the raw student question. Enable it only for controlled
+research or debugging workflows with explicit consent and retention rules.
+
 ## Knowledge Graph And Tutor Context
 
 The initial seed lives at `data/knowledge/rcore-v3-rust-seed.json`. It covers
@@ -136,6 +143,25 @@ to source-grounded context chunks before calling the LLM gateway. The frontend
 does not get access to a raw completion endpoint and cannot directly construct
 the provider prompt. If a requested node has no context, the API returns a
 structured `knowledge_context_missing` error instead of asking the LLM to guess.
+
+Successful tutor chat responses include `interaction_id`. The frontend can use
+that ID to attach lightweight feedback without exposing provider internals:
+
+```bash
+curl -X PUT \
+  -H "Content-Type: application/json" \
+  -d '{"helpful":true,"difficulty":"just_right","feedback_text":"clear citations"}' \
+  http://127.0.0.1:3000/v1/tutor/interactions/1/feedback
+```
+
+Students can fetch their recent tutor interaction metadata:
+
+```bash
+curl http://127.0.0.1:3000/v1/students/student-1/tutor/interactions?limit=20
+```
+
+Unless `OSEDUC_LOG_STUDENT_MESSAGES=true`, this history intentionally omits the
+raw question text and only returns source/citation and safety metadata.
 
 ## Student Model And Policy Engine
 
@@ -178,6 +204,8 @@ The first policy engine is deterministic and intentionally conservative:
   output must not expose key material.
 - Public configuration endpoints must never return API keys or secret-bearing
   fields, including database credentials.
+- Public configuration may expose whether tutor message logging is enabled, but
+  must never expose the messages themselves.
 - LLM provider errors must not include bearer tokens, raw private prompts, or
   unrelated student data.
 - Do not expose `OSEDUC_DATABASE_URL` through public API responses or logs.
