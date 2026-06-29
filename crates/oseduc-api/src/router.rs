@@ -11,7 +11,8 @@ use axum::{
 use oseduc_core::{
     KnowledgeEdge, KnowledgeNeighbor, KnowledgeNode, KnowledgeNodeDetail, LearningPath,
     RecordProgressRequest, SafetyFlag, SourceReference, StudentNodeProgress, StudentProfile,
-    TutorChatRequest, TutorContextChunk, TutorResponse, UpsertStudentProfileRequest,
+    TutorChatRequest, TutorContextChunk, TutorFeedbackRequest, TutorInteraction,
+    TutorInteractionFeedback, TutorResponse, UpsertStudentProfileRequest,
 };
 use oseduc_llm::SecretString;
 use oseduc_llm::{LlmError, LlmGateway};
@@ -28,6 +29,7 @@ pub struct AppState {
     pub knowledge: Arc<dyn KnowledgeCatalog>,
     pub admin_seed_enabled: bool,
     pub admin_token: Option<SecretString>,
+    pub log_student_messages: bool,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -58,7 +60,15 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/students/{student_id}/learning-path",
             get(get_learning_path),
         )
+        .route(
+            "/v1/students/{student_id}/tutor/interactions",
+            get(list_tutor_interactions),
+        )
         .route("/v1/tutor/chat", post(tutor_chat))
+        .route(
+            "/v1/tutor/interactions/{interaction_id}/feedback",
+            put(upsert_tutor_feedback),
+        )
         .with_state(state)
 }
 
@@ -106,6 +116,25 @@ pub trait KnowledgeCatalog: Send + Sync {
         node_id: &str,
         request: &RecordProgressRequest,
     ) -> Result<StudentNodeProgress, StoreError>;
+
+    async fn record_tutor_interaction(
+        &self,
+        request: &TutorChatRequest,
+        response: &TutorResponse,
+        log_student_message: bool,
+    ) -> Result<TutorInteraction, StoreError>;
+
+    async fn list_tutor_interactions(
+        &self,
+        student_id: &str,
+        limit: i64,
+    ) -> Result<Vec<TutorInteraction>, StoreError>;
+
+    async fn upsert_tutor_feedback(
+        &self,
+        interaction_id: i64,
+        request: &TutorFeedbackRequest,
+    ) -> Result<TutorInteractionFeedback, StoreError>;
 }
 
 #[async_trait]
@@ -173,6 +202,31 @@ impl KnowledgeCatalog for PostgresStore {
         request: &RecordProgressRequest,
     ) -> Result<StudentNodeProgress, StoreError> {
         PostgresStore::record_student_progress(self, student_id, node_id, request).await
+    }
+
+    async fn record_tutor_interaction(
+        &self,
+        request: &TutorChatRequest,
+        response: &TutorResponse,
+        log_student_message: bool,
+    ) -> Result<TutorInteraction, StoreError> {
+        PostgresStore::record_tutor_interaction(self, request, response, log_student_message).await
+    }
+
+    async fn list_tutor_interactions(
+        &self,
+        student_id: &str,
+        limit: i64,
+    ) -> Result<Vec<TutorInteraction>, StoreError> {
+        PostgresStore::list_tutor_interactions(self, student_id, limit).await
+    }
+
+    async fn upsert_tutor_feedback(
+        &self,
+        interaction_id: i64,
+        request: &TutorFeedbackRequest,
+    ) -> Result<TutorInteractionFeedback, StoreError> {
+        PostgresStore::upsert_tutor_feedback(self, interaction_id, request).await
     }
 }
 
@@ -298,6 +352,19 @@ async fn get_learning_path(
     )))
 }
 
+async fn list_tutor_interactions(
+    State(state): State<AppState>,
+    Path(student_id): Path<String>,
+    Query(query): Query<TutorInteractionQuery>,
+) -> Result<Json<Vec<TutorInteraction>>, AppError> {
+    Ok(Json(
+        state
+            .knowledge
+            .list_tutor_interactions(&student_id, query.limit.unwrap_or(20))
+            .await?,
+    ))
+}
+
 async fn tutor_chat(
     State(state): State<AppState>,
     Json(request): Json<TutorChatRequest>,
@@ -317,16 +384,39 @@ async fn tutor_chat(
         }
         Err(error) => return Err(error.into()),
     };
-    let response = state
+    let mut response = state
         .gateway
-        .chat_with_context(request, context_chunks)
+        .chat_with_context(request.clone(), context_chunks)
         .await?;
+    let interaction = state
+        .knowledge
+        .record_tutor_interaction(&request, &response, state.log_student_messages)
+        .await?;
+    response.interaction_id = Some(interaction.id);
     Ok(Json(response))
+}
+
+async fn upsert_tutor_feedback(
+    State(state): State<AppState>,
+    Path(interaction_id): Path<i64>,
+    Json(request): Json<TutorFeedbackRequest>,
+) -> Result<Json<TutorInteractionFeedback>, AppError> {
+    Ok(Json(
+        state
+            .knowledge
+            .upsert_tutor_feedback(interaction_id, &request)
+            .await?,
+    ))
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
 struct LearningPathQuery {
     limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct TutorInteractionQuery {
+    limit: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -447,10 +537,11 @@ mod tests {
         };
         AppState {
             gateway: LlmGateway::mock(),
-            public_config: PublicConfig::new(&config, &database),
+            public_config: PublicConfig::new(&config, &database, false),
             knowledge: Arc::new(MemoryKnowledgeCatalog),
             admin_seed_enabled,
             admin_token: admin_seed_enabled.then(|| SecretString::new("admin-token")),
+            log_student_messages: false,
         }
     }
 
@@ -594,6 +685,51 @@ mod tests {
                 updated_at: Some("2026-06-29 00:00:02+00".to_owned()),
             })
         }
+
+        async fn record_tutor_interaction(
+            &self,
+            request: &TutorChatRequest,
+            response: &TutorResponse,
+            log_student_message: bool,
+        ) -> Result<TutorInteraction, StoreError> {
+            Ok(TutorInteraction {
+                id: 42,
+                student_id: request.student_id.clone(),
+                knowledge_node_ids: request.knowledge_node_ids.clone(),
+                provider: response.provider.clone(),
+                citations: response.citations.clone(),
+                safety_flags: response.safety_flags.clone(),
+                message_logged: log_student_message,
+                message: log_student_message.then(|| request.message.clone()),
+                created_at: Some("2026-06-29 00:00:03+00".to_owned()),
+                feedback: None,
+            })
+        }
+
+        async fn list_tutor_interactions(
+            &self,
+            student_id: &str,
+            _limit: i64,
+        ) -> Result<Vec<TutorInteraction>, StoreError> {
+            Ok(vec![sample_tutor_interaction(student_id)])
+        }
+
+        async fn upsert_tutor_feedback(
+            &self,
+            interaction_id: i64,
+            request: &TutorFeedbackRequest,
+        ) -> Result<TutorInteractionFeedback, StoreError> {
+            if interaction_id != 42 {
+                return Err(StoreError::NotFound(interaction_id.to_string()));
+            }
+            Ok(TutorInteractionFeedback {
+                interaction_id,
+                helpful: request.helpful,
+                difficulty: request.difficulty.clone(),
+                feedback_text: request.feedback_text.clone(),
+                updated_at: Some("2026-06-29 00:00:04+00".to_owned()),
+            })
+        }
     }
 
     fn sample_source() -> SourceReference {
@@ -659,6 +795,34 @@ mod tests {
         }
     }
 
+    fn sample_tutor_interaction(student_id: &str) -> TutorInteraction {
+        TutorInteraction {
+            id: 42,
+            student_id: Some(student_id.to_owned()),
+            knowledge_node_ids: vec!["ch4-address-space".to_owned()],
+            provider: "mock".to_owned(),
+            citations: vec![sample_detail().retrieval_chunks[0].citation_label.clone()]
+                .into_iter()
+                .map(|label| oseduc_core::Citation {
+                    label,
+                    source: sample_source().url,
+                    node_id: Some(sample_node().id),
+                })
+                .collect(),
+            safety_flags: vec![SafetyFlag::MockResponse, SafetyFlag::SourceGroundedContext],
+            message_logged: false,
+            message: None,
+            created_at: Some("2026-06-29 00:00:03+00".to_owned()),
+            feedback: Some(TutorInteractionFeedback {
+                interaction_id: 42,
+                helpful: Some(true),
+                difficulty: None,
+                feedback_text: None,
+                updated_at: Some("2026-06-29 00:00:04+00".to_owned()),
+            }),
+        }
+    }
+
     #[tokio::test]
     async fn health_check_returns_ok() {
         let app = build_router(test_state());
@@ -695,6 +859,7 @@ mod tests {
         let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
 
         assert!(body.contains("mock"));
+        assert!(body.contains("\"tutor_message_logging_enabled\":false"));
         assert!(!body.contains("api_key"));
         assert!(!body.contains("token"));
         assert!(!body.contains("dev-password"));
@@ -966,6 +1131,7 @@ mod tests {
         let app = build_router(test_state());
         let body = serde_json::json!({
             "message": "Explain address spaces",
+            "student_id": "student-1",
             "knowledge_node_ids": ["ch4-address-space"]
         });
 
@@ -988,9 +1154,65 @@ mod tests {
         let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
 
         assert!(body.contains("Mock tutor response"));
+        assert!(body.contains("\"interaction_id\":42"));
         assert!(body.contains("rCore v3 ch4"));
         assert!(body.contains("mock_response"));
         assert!(body.contains("source_grounded_context"));
+    }
+
+    #[tokio::test]
+    async fn tutor_interactions_endpoint_returns_history_without_message_log() {
+        let app = build_router(test_state());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/students/student-1/tutor/interactions?limit=5")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
+
+        assert!(body.contains("\"id\":42"));
+        assert!(body.contains("student-1"));
+        assert!(body.contains("\"message_logged\":false"));
+        assert!(!body.contains("Explain address spaces"));
+    }
+
+    #[tokio::test]
+    async fn tutor_feedback_endpoint_records_feedback() {
+        let app = build_router(test_state());
+        let body = serde_json::json!({
+            "helpful": true,
+            "difficulty": "just_right",
+            "feedback_text": "The citations were useful."
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/v1/tutor/interactions/42/feedback")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
+
+        assert!(body.contains("\"interaction_id\":42"));
+        assert!(body.contains("\"helpful\":true"));
+        assert!(body.contains("just_right"));
+        assert!(body.contains("The citations were useful."));
     }
 
     #[tokio::test]

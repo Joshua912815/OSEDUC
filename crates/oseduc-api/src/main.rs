@@ -13,10 +13,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let state = AppState {
         gateway,
-        public_config: PublicConfig::new(&config.llm, &config.database),
+        public_config: PublicConfig::new(
+            &config.llm,
+            &config.database,
+            config.log_student_messages,
+        ),
         knowledge: Arc::new(store),
         admin_seed_enabled: config.database.enable_admin_seed,
         admin_token: config.admin_token,
+        log_student_messages: config.log_student_messages,
     };
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
 
