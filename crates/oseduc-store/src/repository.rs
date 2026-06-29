@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 
 use oseduc_core::{
-    KnowledgeEdge, KnowledgeEdgeDirection, KnowledgeNeighbor, KnowledgeNode, KnowledgeNodeDetail,
-    RecordProgressRequest, RetrievalChunk, SourceReference, StudentNodeProgress, StudentProfile,
-    TutorContextChunk, UpsertStudentProfileRequest,
+    Citation, KnowledgeEdge, KnowledgeEdgeDirection, KnowledgeNeighbor, KnowledgeNode,
+    KnowledgeNodeDetail, RecordProgressRequest, RetrievalChunk, SafetyFlag, SourceReference,
+    StudentNodeProgress, StudentProfile, TutorChatRequest, TutorContextChunk,
+    TutorFeedbackDifficulty, TutorFeedbackRequest, TutorInteraction, TutorInteractionFeedback,
+    TutorResponse, UpsertStudentProfileRequest,
 };
 
 use crate::{KnowledgeSeed, KnowledgeSeedSummary, PostgresStore, StoreError};
@@ -236,6 +238,132 @@ impl PostgresStore {
         .map_err(database_error)
     }
 
+    pub async fn record_tutor_interaction(
+        &self,
+        request: &TutorChatRequest,
+        response: &TutorResponse,
+        log_student_message: bool,
+    ) -> Result<TutorInteraction, StoreError> {
+        let student_id = normalized_optional_text(request.student_id.as_deref());
+        if let Some(student_id) = student_id.as_deref() {
+            self.get_or_create_student_profile(student_id).await?;
+        }
+
+        let citation_labels = response
+            .citations
+            .iter()
+            .map(|citation| citation.label.clone())
+            .collect::<Vec<_>>();
+        let citation_sources = response
+            .citations
+            .iter()
+            .map(|citation| citation.source.clone())
+            .collect::<Vec<_>>();
+        let citation_node_ids = response
+            .citations
+            .iter()
+            .map(|citation| citation.node_id.clone().unwrap_or_default())
+            .collect::<Vec<_>>();
+        let safety_flags = response
+            .safety_flags
+            .iter()
+            .map(SafetyFlag::as_str)
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let message = log_student_message.then(|| request.message.clone());
+
+        sqlx::query_as::<_, TutorInteractionRow>(
+            "INSERT INTO tutor_interactions
+                (student_id, provider, knowledge_node_ids, citation_labels, citation_sources,
+                 citation_node_ids, safety_flags, message_logged, message)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             RETURNING id, student_id, provider, knowledge_node_ids, citation_labels,
+                       citation_sources, citation_node_ids, safety_flags, message_logged, message,
+                       created_at::TEXT AS created_at,
+                       NULL::BOOLEAN AS feedback_helpful,
+                       NULL::TEXT AS feedback_difficulty,
+                       NULL::TEXT AS feedback_text,
+                       NULL::TEXT AS feedback_updated_at",
+        )
+        .bind(student_id.as_deref())
+        .bind(&response.provider)
+        .bind(&request.knowledge_node_ids)
+        .bind(&citation_labels)
+        .bind(&citation_sources)
+        .bind(&citation_node_ids)
+        .bind(&safety_flags)
+        .bind(log_student_message)
+        .bind(&message)
+        .fetch_one(self.pool())
+        .await
+        .map(TutorInteraction::from)
+        .map_err(database_error)
+    }
+
+    pub async fn list_tutor_interactions(
+        &self,
+        student_id: &str,
+        limit: i64,
+    ) -> Result<Vec<TutorInteraction>, StoreError> {
+        let limit = limit.clamp(1, 100);
+
+        sqlx::query_as::<_, TutorInteractionRow>(
+            "SELECT ti.id, ti.student_id, ti.provider, ti.knowledge_node_ids,
+                    ti.citation_labels, ti.citation_sources, ti.citation_node_ids,
+                    ti.safety_flags, ti.message_logged, ti.message,
+                    ti.created_at::TEXT AS created_at,
+                    tf.helpful AS feedback_helpful,
+                    tf.difficulty AS feedback_difficulty,
+                    tf.feedback_text AS feedback_text,
+                    tf.updated_at::TEXT AS feedback_updated_at
+             FROM tutor_interactions ti
+             LEFT JOIN tutor_interaction_feedback tf ON tf.interaction_id = ti.id
+             WHERE ti.student_id = $1
+             ORDER BY ti.created_at DESC, ti.id DESC
+             LIMIT $2",
+        )
+        .bind(student_id)
+        .bind(limit)
+        .fetch_all(self.pool())
+        .await
+        .map(|rows| rows.into_iter().map(TutorInteraction::from).collect())
+        .map_err(database_error)
+    }
+
+    pub async fn upsert_tutor_feedback(
+        &self,
+        interaction_id: i64,
+        request: &TutorFeedbackRequest,
+    ) -> Result<TutorInteractionFeedback, StoreError> {
+        self.ensure_tutor_interaction_exists(interaction_id).await?;
+        let difficulty = request
+            .difficulty
+            .as_ref()
+            .map(TutorFeedbackDifficulty::as_str);
+        let feedback_text = normalized_optional_text(request.feedback_text.as_deref());
+
+        sqlx::query_as::<_, TutorFeedbackRow>(
+            "INSERT INTO tutor_interaction_feedback
+                (interaction_id, helpful, difficulty, feedback_text, updated_at)
+             VALUES ($1, $2, $3, $4, now())
+             ON CONFLICT (interaction_id) DO UPDATE SET
+                helpful = EXCLUDED.helpful,
+                difficulty = EXCLUDED.difficulty,
+                feedback_text = EXCLUDED.feedback_text,
+                updated_at = now()
+             RETURNING interaction_id, helpful, difficulty, feedback_text,
+                       updated_at::TEXT AS updated_at",
+        )
+        .bind(interaction_id)
+        .bind(request.helpful)
+        .bind(difficulty)
+        .bind(&feedback_text)
+        .fetch_one(self.pool())
+        .await
+        .map(TutorInteractionFeedback::from)
+        .map_err(database_error)
+    }
+
     pub async fn seed_knowledge_graph(
         &self,
         seed: &KnowledgeSeed,
@@ -398,6 +526,21 @@ impl PostgresStore {
         .map(|rows| rows.into_iter().map(RetrievalChunk::from).collect())
         .map_err(database_error)
     }
+
+    async fn ensure_tutor_interaction_exists(&self, id: i64) -> Result<(), StoreError> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM tutor_interactions WHERE id = $1)",
+        )
+        .bind(id)
+        .fetch_one(self.pool())
+        .await
+        .map_err(database_error)?;
+        if exists {
+            Ok(())
+        } else {
+            Err(StoreError::NotFound(id.to_string()))
+        }
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -514,6 +657,87 @@ impl From<StudentNodeProgressRow> for StudentNodeProgress {
 }
 
 #[derive(sqlx::FromRow)]
+struct TutorInteractionRow {
+    id: i64,
+    student_id: Option<String>,
+    provider: String,
+    knowledge_node_ids: Vec<String>,
+    citation_labels: Vec<String>,
+    citation_sources: Vec<String>,
+    citation_node_ids: Vec<String>,
+    safety_flags: Vec<String>,
+    message_logged: bool,
+    message: Option<String>,
+    created_at: String,
+    feedback_helpful: Option<bool>,
+    feedback_difficulty: Option<String>,
+    feedback_text: Option<String>,
+    feedback_updated_at: Option<String>,
+}
+
+impl From<TutorInteractionRow> for TutorInteraction {
+    fn from(row: TutorInteractionRow) -> Self {
+        let feedback = row
+            .feedback_updated_at
+            .map(|updated_at| TutorInteractionFeedback {
+                interaction_id: row.id,
+                helpful: row.feedback_helpful,
+                difficulty: row
+                    .feedback_difficulty
+                    .as_deref()
+                    .and_then(TutorFeedbackDifficulty::parse),
+                feedback_text: row.feedback_text,
+                updated_at: Some(updated_at),
+            });
+
+        Self {
+            id: row.id,
+            student_id: row.student_id,
+            knowledge_node_ids: row.knowledge_node_ids,
+            provider: row.provider,
+            citations: citations_from_arrays(
+                row.citation_labels,
+                row.citation_sources,
+                row.citation_node_ids,
+            ),
+            safety_flags: row
+                .safety_flags
+                .into_iter()
+                .filter_map(|flag| SafetyFlag::parse(&flag))
+                .collect(),
+            message_logged: row.message_logged,
+            message: row.message,
+            created_at: Some(row.created_at),
+            feedback,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct TutorFeedbackRow {
+    interaction_id: i64,
+    helpful: Option<bool>,
+    difficulty: Option<String>,
+    feedback_text: Option<String>,
+    updated_at: String,
+}
+
+impl From<TutorFeedbackRow> for TutorInteractionFeedback {
+    fn from(row: TutorFeedbackRow) -> Self {
+        Self {
+            interaction_id: row.interaction_id,
+            helpful: row.helpful,
+            difficulty: row
+                .difficulty
+                .as_deref()
+                .and_then(TutorFeedbackDifficulty::parse),
+            feedback_text: row.feedback_text,
+            updated_at: Some(row.updated_at),
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
 struct RetrievalChunkRow {
     id: String,
     node_id: String,
@@ -602,4 +826,59 @@ impl From<TutorContextChunkRow> for TutorContextChunk {
 
 fn database_error(error: sqlx::Error) -> StoreError {
     StoreError::Database(error.to_string())
+}
+
+fn normalized_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn citations_from_arrays(
+    labels: Vec<String>,
+    sources: Vec<String>,
+    node_ids: Vec<String>,
+) -> Vec<Citation> {
+    labels
+        .into_iter()
+        .enumerate()
+        .map(|(index, label)| Citation {
+            label,
+            source: sources.get(index).cloned().unwrap_or_default(),
+            node_id: node_ids
+                .get(index)
+                .filter(|node_id| !node_id.is_empty())
+                .cloned(),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconstructs_citations_from_parallel_arrays() {
+        let citations = citations_from_arrays(
+            vec!["rCore v3 ch4".to_owned()],
+            vec!["https://example.test/ch4".to_owned()],
+            vec!["ch4-address-space".to_owned()],
+        );
+
+        assert_eq!(citations.len(), 1);
+        assert_eq!(citations[0].label, "rCore v3 ch4");
+        assert_eq!(citations[0].source, "https://example.test/ch4");
+        assert_eq!(citations[0].node_id, Some("ch4-address-space".to_owned()));
+    }
+
+    #[test]
+    fn normalizes_optional_text() {
+        assert_eq!(
+            normalized_optional_text(Some("  hello  ")),
+            Some("hello".to_owned())
+        );
+        assert_eq!(normalized_optional_text(Some("  ")), None);
+        assert_eq!(normalized_optional_text(None), None);
+    }
 }
