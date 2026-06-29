@@ -2,19 +2,21 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use oseduc_core::{
-    KnowledgeNeighbor, KnowledgeNode, KnowledgeNodeDetail, SafetyFlag, SourceReference,
-    TutorChatRequest, TutorContextChunk, TutorResponse,
+    KnowledgeEdge, KnowledgeNeighbor, KnowledgeNode, KnowledgeNodeDetail, LearningPath,
+    RecordProgressRequest, SafetyFlag, SourceReference, StudentNodeProgress, StudentProfile,
+    TutorChatRequest, TutorContextChunk, TutorResponse, UpsertStudentProfileRequest,
 };
 use oseduc_llm::{LlmError, LlmGateway};
+use oseduc_policy::recommend_learning_path;
 use oseduc_store::{KnowledgeSeed, KnowledgeSeedSummary, PostgresStore, StoreError};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::PublicConfig;
 
@@ -38,6 +40,22 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/v1/sources", get(list_sources))
         .route("/v1/admin/knowledge/seed", post(seed_knowledge))
+        .route(
+            "/v1/students/{student_id}/profile",
+            get(get_student_profile).put(upsert_student_profile),
+        )
+        .route(
+            "/v1/students/{student_id}/progress",
+            get(list_student_progress),
+        )
+        .route(
+            "/v1/students/{student_id}/progress/{node_id}",
+            put(record_student_progress),
+        )
+        .route(
+            "/v1/students/{student_id}/learning-path",
+            get(get_learning_path),
+        )
         .route("/v1/tutor/chat", post(tutor_chat))
         .with_state(state)
 }
@@ -45,6 +63,8 @@ pub fn build_router(state: AppState) -> Router {
 #[async_trait]
 pub trait KnowledgeCatalog: Send + Sync {
     async fn list_nodes(&self) -> Result<Vec<KnowledgeNode>, StoreError>;
+
+    async fn list_edges(&self) -> Result<Vec<KnowledgeEdge>, StoreError>;
 
     async fn get_node_detail(&self, id: &str) -> Result<KnowledgeNodeDetail, StoreError>;
 
@@ -61,12 +81,39 @@ pub trait KnowledgeCatalog: Send + Sync {
         &self,
         node_ids: &[String],
     ) -> Result<Vec<TutorContextChunk>, StoreError>;
+
+    async fn get_or_create_student_profile(
+        &self,
+        student_id: &str,
+    ) -> Result<StudentProfile, StoreError>;
+
+    async fn upsert_student_profile(
+        &self,
+        student_id: &str,
+        request: &UpsertStudentProfileRequest,
+    ) -> Result<StudentProfile, StoreError>;
+
+    async fn list_student_progress(
+        &self,
+        student_id: &str,
+    ) -> Result<Vec<StudentNodeProgress>, StoreError>;
+
+    async fn record_student_progress(
+        &self,
+        student_id: &str,
+        node_id: &str,
+        request: &RecordProgressRequest,
+    ) -> Result<StudentNodeProgress, StoreError>;
 }
 
 #[async_trait]
 impl KnowledgeCatalog for PostgresStore {
     async fn list_nodes(&self) -> Result<Vec<KnowledgeNode>, StoreError> {
         PostgresStore::list_nodes(self).await
+    }
+
+    async fn list_edges(&self) -> Result<Vec<KnowledgeEdge>, StoreError> {
+        PostgresStore::list_edges(self).await
     }
 
     async fn get_node_detail(&self, id: &str) -> Result<KnowledgeNodeDetail, StoreError> {
@@ -93,6 +140,37 @@ impl KnowledgeCatalog for PostgresStore {
         node_ids: &[String],
     ) -> Result<Vec<TutorContextChunk>, StoreError> {
         PostgresStore::tutor_context_for_node_ids(self, node_ids).await
+    }
+
+    async fn get_or_create_student_profile(
+        &self,
+        student_id: &str,
+    ) -> Result<StudentProfile, StoreError> {
+        PostgresStore::get_or_create_student_profile(self, student_id).await
+    }
+
+    async fn upsert_student_profile(
+        &self,
+        student_id: &str,
+        request: &UpsertStudentProfileRequest,
+    ) -> Result<StudentProfile, StoreError> {
+        PostgresStore::upsert_student_profile(self, student_id, request).await
+    }
+
+    async fn list_student_progress(
+        &self,
+        student_id: &str,
+    ) -> Result<Vec<StudentNodeProgress>, StoreError> {
+        PostgresStore::list_student_progress(self, student_id).await
+    }
+
+    async fn record_student_progress(
+        &self,
+        student_id: &str,
+        node_id: &str,
+        request: &RecordProgressRequest,
+    ) -> Result<StudentNodeProgress, StoreError> {
+        PostgresStore::record_student_progress(self, student_id, node_id, request).await
     }
 }
 
@@ -145,6 +223,71 @@ async fn seed_knowledge(
     Ok(Json(state.knowledge.seed_knowledge_graph(&seed).await?))
 }
 
+async fn get_student_profile(
+    State(state): State<AppState>,
+    Path(student_id): Path<String>,
+) -> Result<Json<StudentProfile>, AppError> {
+    Ok(Json(
+        state
+            .knowledge
+            .get_or_create_student_profile(&student_id)
+            .await?,
+    ))
+}
+
+async fn upsert_student_profile(
+    State(state): State<AppState>,
+    Path(student_id): Path<String>,
+    Json(request): Json<UpsertStudentProfileRequest>,
+) -> Result<Json<StudentProfile>, AppError> {
+    Ok(Json(
+        state
+            .knowledge
+            .upsert_student_profile(&student_id, &request)
+            .await?,
+    ))
+}
+
+async fn list_student_progress(
+    State(state): State<AppState>,
+    Path(student_id): Path<String>,
+) -> Result<Json<Vec<StudentNodeProgress>>, AppError> {
+    Ok(Json(
+        state.knowledge.list_student_progress(&student_id).await?,
+    ))
+}
+
+async fn record_student_progress(
+    State(state): State<AppState>,
+    Path((student_id, node_id)): Path<(String, String)>,
+    Json(request): Json<RecordProgressRequest>,
+) -> Result<Json<StudentNodeProgress>, AppError> {
+    Ok(Json(
+        state
+            .knowledge
+            .record_student_progress(&student_id, &node_id, &request)
+            .await?,
+    ))
+}
+
+async fn get_learning_path(
+    State(state): State<AppState>,
+    Path(student_id): Path<String>,
+    Query(query): Query<LearningPathQuery>,
+) -> Result<Json<LearningPath>, AppError> {
+    let nodes = state.knowledge.list_nodes().await?;
+    let edges = state.knowledge.list_edges().await?;
+    let progress = state.knowledge.list_student_progress(&student_id).await?;
+
+    Ok(Json(recommend_learning_path(
+        student_id,
+        &nodes,
+        &edges,
+        &progress,
+        query.limit,
+    )))
+}
+
 async fn tutor_chat(
     State(state): State<AppState>,
     Json(request): Json<TutorChatRequest>,
@@ -169,6 +312,11 @@ async fn tutor_chat(
         .chat_with_context(request, context_chunks)
         .await?;
     Ok(Json(response))
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct LearningPathQuery {
+    limit: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -197,6 +345,9 @@ impl From<StoreError> for AppError {
     fn from(error: StoreError) -> Self {
         match error {
             StoreError::NotFound(message) => Self::new(StatusCode::NOT_FOUND, "not_found", message),
+            StoreError::InvalidInput(message) => {
+                Self::new(StatusCode::BAD_REQUEST, "invalid_input", message)
+            }
             StoreError::InvalidSeed(_) => Self::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_seed",
@@ -255,7 +406,7 @@ mod tests {
         body::{to_bytes, Body},
         http::{Method, Request},
     };
-    use oseduc_core::{KnowledgeEdgeDirection, RetrievalChunk};
+    use oseduc_core::{KnowledgeEdgeDirection, LearningDepth, ProgressStatus, RetrievalChunk};
     use oseduc_llm::LlmConfig;
     use oseduc_store::{DatabaseConfig, SecretDatabaseUrl};
     use tower::ServiceExt;
@@ -287,7 +438,11 @@ mod tests {
     #[async_trait]
     impl KnowledgeCatalog for MemoryKnowledgeCatalog {
         async fn list_nodes(&self) -> Result<Vec<KnowledgeNode>, StoreError> {
-            Ok(vec![sample_node()])
+            Ok(sample_nodes())
+        }
+
+        async fn list_edges(&self) -> Result<Vec<KnowledgeEdge>, StoreError> {
+            Ok(sample_edges())
         }
 
         async fn get_node_detail(&self, id: &str) -> Result<KnowledgeNodeDetail, StoreError> {
@@ -352,6 +507,71 @@ mod tests {
                 Err(StoreError::NotFound("missing-node".to_owned()))
             }
         }
+
+        async fn get_or_create_student_profile(
+            &self,
+            student_id: &str,
+        ) -> Result<StudentProfile, StoreError> {
+            Ok(StudentProfile {
+                student_id: student_id.to_owned(),
+                display_name: None,
+                learning_goal: None,
+                preferred_depth: LearningDepth::Balanced,
+                created_at: Some("2026-06-29 00:00:00+00".to_owned()),
+                updated_at: Some("2026-06-29 00:00:00+00".to_owned()),
+            })
+        }
+
+        async fn upsert_student_profile(
+            &self,
+            student_id: &str,
+            request: &UpsertStudentProfileRequest,
+        ) -> Result<StudentProfile, StoreError> {
+            Ok(StudentProfile {
+                student_id: student_id.to_owned(),
+                display_name: request.display_name.clone(),
+                learning_goal: request.learning_goal.clone(),
+                preferred_depth: request.preferred_depth.clone(),
+                created_at: Some("2026-06-29 00:00:00+00".to_owned()),
+                updated_at: Some("2026-06-29 00:00:01+00".to_owned()),
+            })
+        }
+
+        async fn list_student_progress(
+            &self,
+            student_id: &str,
+        ) -> Result<Vec<StudentNodeProgress>, StoreError> {
+            Ok(vec![StudentNodeProgress {
+                student_id: student_id.to_owned(),
+                node_id: "ch4-address-space".to_owned(),
+                status: ProgressStatus::Mastered,
+                mastery_score: 90,
+                notes: Some("comfortable with page tables".to_owned()),
+                updated_at: Some("2026-06-29 00:00:00+00".to_owned()),
+            }])
+        }
+
+        async fn record_student_progress(
+            &self,
+            student_id: &str,
+            node_id: &str,
+            request: &RecordProgressRequest,
+        ) -> Result<StudentNodeProgress, StoreError> {
+            if !sample_nodes().iter().any(|node| node.id == node_id) {
+                return Err(StoreError::NotFound(node_id.to_owned()));
+            }
+            let mastery_score = request
+                .validated_score()
+                .map_err(|error| StoreError::InvalidInput(error.to_string()))?;
+            Ok(StudentNodeProgress {
+                student_id: student_id.to_owned(),
+                node_id: node_id.to_owned(),
+                status: request.status.clone(),
+                mastery_score,
+                notes: request.notes.clone(),
+                updated_at: Some("2026-06-29 00:00:02+00".to_owned()),
+            })
+        }
     }
 
     fn sample_source() -> SourceReference {
@@ -376,6 +596,30 @@ mod tests {
             common_misconceptions: Vec::new(),
             source_id: sample_source().id,
         }
+    }
+
+    fn sample_nodes() -> Vec<KnowledgeNode> {
+        vec![
+            sample_node(),
+            KnowledgeNode {
+                id: "ch5-process".to_owned(),
+                title: "Process".to_owned(),
+                chapter: "chapter5".to_owned(),
+                kind: "rust_os_mainline".to_owned(),
+                summary: "Process model".to_owned(),
+                learning_objectives: Vec::new(),
+                common_misconceptions: Vec::new(),
+                source_id: "rcore-v3-ch5".to_owned(),
+            },
+        ]
+    }
+
+    fn sample_edges() -> Vec<KnowledgeEdge> {
+        vec![KnowledgeEdge {
+            from_node_id: "ch4-address-space".to_owned(),
+            to_node_id: "ch5-process".to_owned(),
+            relation: "prerequisite_for".to_owned(),
+        }]
     }
 
     fn sample_detail() -> KnowledgeNodeDetail {
@@ -521,6 +765,118 @@ mod tests {
 
         assert!(body.contains("rcore-v3-ch4"));
         assert!(body.contains("GPL-3.0"));
+    }
+
+    #[tokio::test]
+    async fn student_profile_endpoint_upserts_profile() {
+        let app = build_router(test_state());
+        let body = serde_json::json!({
+            "display_name": "Alice",
+            "learning_goal": "finish rCore ch1-ch8",
+            "preferred_depth": "deep"
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/v1/students/student-1/profile")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
+
+        assert!(body.contains("student-1"));
+        assert!(body.contains("Alice"));
+        assert!(body.contains("deep"));
+    }
+
+    #[tokio::test]
+    async fn student_progress_endpoint_records_progress() {
+        let app = build_router(test_state());
+        let body = serde_json::json!({
+            "status": "needs_review",
+            "mastery_score": 55,
+            "notes": "confused by fork and exec"
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/v1/students/student-1/progress/ch5-process")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
+
+        assert!(body.contains("ch5-process"));
+        assert!(body.contains("needs_review"));
+        assert!(body.contains("55"));
+    }
+
+    #[tokio::test]
+    async fn student_progress_endpoint_rejects_invalid_score() {
+        let app = build_router(test_state());
+        let body = serde_json::json!({
+            "status": "in_progress",
+            "mastery_score": 101
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/v1/students/student-1/progress/ch5-process")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body.contains("invalid_input"));
+    }
+
+    #[tokio::test]
+    async fn learning_path_endpoint_recommends_next_node() {
+        let app = build_router(test_state());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/students/student-1/learning-path?limit=3")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
+
+        assert!(body.contains("ch5-process"));
+        assert!(body.contains("recommendations"));
+        assert!(body.contains("completed_nodes"));
     }
 
     #[tokio::test]

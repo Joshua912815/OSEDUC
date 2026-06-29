@@ -11,6 +11,7 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 oseduc-core = { path = "../oseduc-core" }
 oseduc-llm = { path = "../oseduc-llm" }
+oseduc-policy = { path = "../oseduc-policy" }
 oseduc-store = { path = "../oseduc-store" }
 serde = { workspace = true }
 tokio = { workspace = true }

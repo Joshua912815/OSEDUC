@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 
 use oseduc_core::{
-    KnowledgeEdgeDirection, KnowledgeNeighbor, KnowledgeNode, KnowledgeNodeDetail, RetrievalChunk,
-    SourceReference, TutorContextChunk,
+    KnowledgeEdge, KnowledgeEdgeDirection, KnowledgeNeighbor, KnowledgeNode, KnowledgeNodeDetail,
+    RecordProgressRequest, RetrievalChunk, SourceReference, StudentNodeProgress, StudentProfile,
+    TutorContextChunk, UpsertStudentProfileRequest,
 };
 
 use crate::{KnowledgeSeed, KnowledgeSeedSummary, PostgresStore, StoreError};
@@ -30,6 +31,18 @@ impl PostgresStore {
         .fetch_all(self.pool())
         .await
         .map(|rows| rows.into_iter().map(KnowledgeNode::from).collect())
+        .map_err(database_error)
+    }
+
+    pub async fn list_edges(&self) -> Result<Vec<KnowledgeEdge>, StoreError> {
+        sqlx::query_as::<_, KnowledgeEdgeRow>(
+            "SELECT from_node_id, to_node_id, relation
+             FROM knowledge_edges
+             ORDER BY from_node_id, to_node_id, relation",
+        )
+        .fetch_all(self.pool())
+        .await
+        .map(|rows| rows.into_iter().map(KnowledgeEdge::from).collect())
         .map_err(database_error)
     }
 
@@ -105,6 +118,122 @@ impl PostgresStore {
         }
 
         Ok(rows.into_iter().map(TutorContextChunk::from).collect())
+    }
+
+    pub async fn get_or_create_student_profile(
+        &self,
+        student_id: &str,
+    ) -> Result<StudentProfile, StoreError> {
+        sqlx::query(
+            "INSERT INTO student_profiles (student_id)
+             VALUES ($1)
+             ON CONFLICT (student_id) DO NOTHING",
+        )
+        .bind(student_id)
+        .execute(self.pool())
+        .await
+        .map_err(database_error)?;
+
+        self.get_student_profile(student_id).await
+    }
+
+    pub async fn upsert_student_profile(
+        &self,
+        student_id: &str,
+        request: &UpsertStudentProfileRequest,
+    ) -> Result<StudentProfile, StoreError> {
+        sqlx::query_as::<_, StudentProfileRow>(
+            "INSERT INTO student_profiles
+                (student_id, display_name, learning_goal, preferred_depth, updated_at)
+             VALUES ($1, $2, $3, $4, now())
+             ON CONFLICT (student_id) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                learning_goal = EXCLUDED.learning_goal,
+                preferred_depth = EXCLUDED.preferred_depth,
+                updated_at = now()
+             RETURNING student_id, display_name, learning_goal, preferred_depth,
+                       created_at::TEXT AS created_at, updated_at::TEXT AS updated_at",
+        )
+        .bind(student_id)
+        .bind(&request.display_name)
+        .bind(&request.learning_goal)
+        .bind(request.preferred_depth.as_str())
+        .fetch_one(self.pool())
+        .await
+        .map(StudentProfile::from)
+        .map_err(database_error)
+    }
+
+    pub async fn get_student_profile(
+        &self,
+        student_id: &str,
+    ) -> Result<StudentProfile, StoreError> {
+        sqlx::query_as::<_, StudentProfileRow>(
+            "SELECT student_id, display_name, learning_goal, preferred_depth,
+                    created_at::TEXT AS created_at, updated_at::TEXT AS updated_at
+             FROM student_profiles
+             WHERE student_id = $1",
+        )
+        .bind(student_id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(database_error)?
+        .map(StudentProfile::from)
+        .ok_or_else(|| StoreError::NotFound(student_id.to_owned()))
+    }
+
+    pub async fn list_student_progress(
+        &self,
+        student_id: &str,
+    ) -> Result<Vec<StudentNodeProgress>, StoreError> {
+        sqlx::query_as::<_, StudentNodeProgressRow>(
+            "SELECT student_id, node_id, status, mastery_score::INT AS mastery_score,
+                    notes, updated_at::TEXT AS updated_at
+             FROM student_node_progress
+             WHERE student_id = $1
+             ORDER BY node_id",
+        )
+        .bind(student_id)
+        .fetch_all(self.pool())
+        .await
+        .map(|rows| rows.into_iter().map(StudentNodeProgress::from).collect())
+        .map_err(database_error)
+    }
+
+    pub async fn record_student_progress(
+        &self,
+        student_id: &str,
+        node_id: &str,
+        request: &RecordProgressRequest,
+    ) -> Result<StudentNodeProgress, StoreError> {
+        self.ensure_node_exists(node_id).await?;
+        self.get_or_create_student_profile(student_id).await?;
+        let mastery_score = request
+            .validated_score()
+            .map_err(|error| StoreError::InvalidInput(error.to_string()))?;
+
+        sqlx::query_as::<_, StudentNodeProgressRow>(
+            "INSERT INTO student_node_progress
+                (student_id, node_id, status, mastery_score, notes, last_interaction_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, now(), now())
+             ON CONFLICT (student_id, node_id) DO UPDATE SET
+                status = EXCLUDED.status,
+                mastery_score = EXCLUDED.mastery_score,
+                notes = EXCLUDED.notes,
+                last_interaction_at = now(),
+                updated_at = now()
+             RETURNING student_id, node_id, status, mastery_score::INT AS mastery_score,
+                       notes, updated_at::TEXT AS updated_at",
+        )
+        .bind(student_id)
+        .bind(node_id)
+        .bind(request.status.as_str())
+        .bind(i16::from(mastery_score))
+        .bind(&request.notes)
+        .fetch_one(self.pool())
+        .await
+        .map(StudentNodeProgress::from)
+        .map_err(database_error)
     }
 
     pub async fn seed_knowledge_graph(
@@ -317,6 +446,69 @@ impl From<KnowledgeNodeRow> for KnowledgeNode {
             learning_objectives: row.learning_objectives,
             common_misconceptions: row.common_misconceptions,
             source_id: row.source_id,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct KnowledgeEdgeRow {
+    from_node_id: String,
+    to_node_id: String,
+    relation: String,
+}
+
+impl From<KnowledgeEdgeRow> for KnowledgeEdge {
+    fn from(row: KnowledgeEdgeRow) -> Self {
+        Self {
+            from_node_id: row.from_node_id,
+            to_node_id: row.to_node_id,
+            relation: row.relation,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct StudentProfileRow {
+    student_id: String,
+    display_name: Option<String>,
+    learning_goal: Option<String>,
+    preferred_depth: String,
+    created_at: String,
+    updated_at: String,
+}
+
+impl From<StudentProfileRow> for StudentProfile {
+    fn from(row: StudentProfileRow) -> Self {
+        Self {
+            student_id: row.student_id,
+            display_name: row.display_name,
+            learning_goal: row.learning_goal,
+            preferred_depth: oseduc_core::LearningDepth::parse(&row.preferred_depth),
+            created_at: Some(row.created_at),
+            updated_at: Some(row.updated_at),
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct StudentNodeProgressRow {
+    student_id: String,
+    node_id: String,
+    status: String,
+    mastery_score: i32,
+    notes: Option<String>,
+    updated_at: String,
+}
+
+impl From<StudentNodeProgressRow> for StudentNodeProgress {
+    fn from(row: StudentNodeProgressRow) -> Self {
+        Self {
+            student_id: row.student_id,
+            node_id: row.node_id,
+            status: oseduc_core::ProgressStatus::parse(&row.status),
+            mastery_score: row.mastery_score.clamp(0, 100) as u8,
+            notes: row.notes,
+            updated_at: Some(row.updated_at),
         }
     }
 }

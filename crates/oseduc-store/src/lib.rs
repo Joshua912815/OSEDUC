@@ -45,6 +45,7 @@ impl PostgresStore {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StoreError {
     Database(String),
+    InvalidInput(String),
     InvalidSeed(String),
     Migration(String),
     NotFound(String),
@@ -54,6 +55,9 @@ impl std::fmt::Display for StoreError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Database(_) => formatter.write_str("knowledge store database operation failed"),
+            Self::InvalidInput(message) => {
+                write!(formatter, "knowledge store input is invalid: {message}")
+            }
             Self::InvalidSeed(_) => formatter.write_str("knowledge seed validation failed"),
             Self::Migration(_) => formatter.write_str("knowledge store migration failed"),
             Self::NotFound(id) => write!(formatter, "knowledge store item not found: {id}"),

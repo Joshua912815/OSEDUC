@@ -918,6 +918,7 @@ dependencies = [
  "axum",
  "oseduc-core",
  "oseduc-llm",
+ "oseduc-policy",
  "oseduc-store",
  "serde",
  "serde_json",
