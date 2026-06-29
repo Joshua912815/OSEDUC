@@ -945,6 +945,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "oseduc-policy"
+version = "0.1.0"
+dependencies = [
+ "oseduc-core",
+]
+
+[[package]]
 name = "oseduc-store"
 version = "0.1.0"
 dependencies = [

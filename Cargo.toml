@@ -3,6 +3,7 @@ members = [
     "crates/oseduc-api",
     "crates/oseduc-core",
     "crates/oseduc-llm",
+    "crates/oseduc-policy",
     "crates/oseduc-store",
 ]
 resolver = "2"
