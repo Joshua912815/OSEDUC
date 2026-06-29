@@ -16,8 +16,11 @@ The repository is organized as a Rust workspace:
   citations, safety flags, and knowledge-graph records.
 - `crates/oseduc-llm`: safe LLM configuration, redacted API key handling, mock
   provider, and OpenAI-compatible provider.
+- `crates/oseduc-policy`: deterministic learning-path recommendation rules for
+  the current on-policy MVP.
 - `crates/oseduc-store`: Postgres-backed knowledge graph storage, migrations,
-  seed validation, and source-grounded tutor context retrieval.
+  seed validation, student progress persistence, and source-grounded tutor
+  context retrieval.
 - `crates/oseduc-api`: Axum HTTP API and runtime configuration.
 
 The first API surface is intentionally small but source-aware:
@@ -29,6 +32,11 @@ The first API surface is intentionally small but source-aware:
 - `GET /v1/knowledge/nodes/{id}/neighbors`
 - `GET /v1/sources`
 - `POST /v1/admin/knowledge/seed`
+- `GET /v1/students/{student_id}/profile`
+- `PUT /v1/students/{student_id}/profile`
+- `GET /v1/students/{student_id}/progress`
+- `PUT /v1/students/{student_id}/progress/{node_id}`
+- `GET /v1/students/{student_id}/learning-path`
 - `POST /v1/tutor/chat`
 
 ## Local Setup
@@ -59,12 +67,15 @@ locally before starting the server:
 
 ```bash
 export OSEDUC_ENABLE_ADMIN_SEED=true
+export OSEDUC_ADMIN_TOKEN=replace-with-local-admin-token
 ```
 
 Then call:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/v1/admin/knowledge/seed
+curl -X POST \
+  -H "Authorization: Bearer $OSEDUC_ADMIN_TOKEN" \
+  http://127.0.0.1:3000/v1/admin/knowledge/seed
 curl http://127.0.0.1:3000/v1/knowledge/nodes
 ```
 
@@ -96,7 +107,8 @@ OSEDUC_LLM_TIMEOUT_SECS=30
 `OSEDUC_DATABASE_URL` is required for the API service. `OSEDUC_AUTO_MIGRATE`
 defaults to `false`; set it to `true` only for local development or controlled
 deploy migrations. `OSEDUC_ENABLE_ADMIN_SEED` defaults to `false`; keep it off
-outside local development and controlled admin workflows.
+outside local development and controlled admin workflows. `OSEDUC_ADMIN_TOKEN`
+is required whenever `OSEDUC_ENABLE_ADMIN_SEED=true`.
 
 ## Knowledge Graph And Tutor Context
 
@@ -125,6 +137,38 @@ does not get access to a raw completion endpoint and cannot directly construct
 the provider prompt. If a requested node has no context, the API returns a
 structured `knowledge_context_missing` error instead of asking the LLM to guess.
 
+## Student Model And Policy Engine
+
+The backend now stores student-facing state separately from source material:
+
+- `student_profiles`: display name, learning goal, and preferred explanation
+  depth.
+- `student_node_progress`: per-node status, mastery score, notes, and update
+  time.
+
+Progress status values are:
+
+- `not_started`
+- `in_progress`
+- `needs_review`
+- `mastered`
+
+`mastery_score` is an integer from 0 to 100. If omitted when recording progress,
+the backend derives a conservative default from the status.
+
+The learning-path endpoint computes recommendations at request time:
+
+```bash
+curl http://127.0.0.1:3000/v1/students/student-1/learning-path
+```
+
+The first policy engine is deterministic and intentionally conservative:
+
+- mastered nodes are skipped once their mastery score is at least 80.
+- nodes with unmet prerequisites are not recommended.
+- `needs_review` nodes outrank in-progress and new nodes.
+- recommendations preserve the Rust OS mainline order when priorities tie.
+
 ## Secret Policy
 
 - Never commit real API keys, `.env`, `.env.local`, or `.env.*.local`.
@@ -137,13 +181,14 @@ structured `knowledge_context_missing` error instead of asking the LLM to guess.
 - LLM provider errors must not include bearer tokens, raw private prompts, or
   unrelated student data.
 - Do not expose `OSEDUC_DATABASE_URL` through public API responses or logs.
+- Do not expose `OSEDUC_ADMIN_TOKEN` through public API responses or logs.
 
 Before committing, run:
 
 ```bash
 cargo fmt --check
 cargo test
-git diff --cached | rg "sk-|OSEDUC_LLM_API_KEY=|Bearer " || true
+git diff --cached | rg "sk-|OSEDUC_LLM_API_KEY=|OSEDUC_ADMIN_TOKEN=|Bearer " || true
 ```
 
 The final command is a sanity check. It may catch harmless examples, but no real
