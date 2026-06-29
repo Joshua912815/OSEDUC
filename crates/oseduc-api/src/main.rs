@@ -16,6 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         public_config: PublicConfig::new(&config.llm, &config.database),
         knowledge: Arc::new(store),
         admin_seed_enabled: config.database.enable_admin_seed,
+        admin_token: config.admin_token,
     };
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
 

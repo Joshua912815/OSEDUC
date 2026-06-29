@@ -1,6 +1,6 @@
 use std::{env, net::SocketAddr};
 
-use oseduc_llm::{LlmConfig, LlmProviderKind};
+use oseduc_llm::{LlmConfig, LlmProviderKind, SecretString};
 use oseduc_store::DatabaseConfig;
 use serde::Serialize;
 
@@ -11,6 +11,7 @@ pub struct ApiConfig {
     pub bind_addr: SocketAddr,
     pub llm: LlmConfig,
     pub database: DatabaseConfig,
+    pub admin_token: Option<SecretString>,
 }
 
 impl ApiConfig {
@@ -21,11 +22,21 @@ impl ApiConfig {
             .map_err(|_| ApiConfigError::InvalidBindAddr)?;
         let llm = LlmConfig::from_env().map_err(ApiConfigError::Llm)?;
         let database = DatabaseConfig::from_env().map_err(ApiConfigError::Database)?;
+        let admin_token = env::var("OSEDUC_ADMIN_TOKEN")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .map(SecretString::new);
+
+        if database.enable_admin_seed && admin_token.is_none() {
+            return Err(ApiConfigError::MissingAdminToken);
+        }
 
         Ok(Self {
             bind_addr,
             llm,
             database,
+            admin_token,
         })
     }
 }
@@ -57,6 +68,7 @@ impl PublicConfig {
 pub enum ApiConfigError {
     Database(oseduc_store::DatabaseConfigError),
     InvalidBindAddr,
+    MissingAdminToken,
     Llm(oseduc_llm::ConfigError),
 }
 
@@ -65,6 +77,9 @@ impl std::fmt::Display for ApiConfigError {
         match self {
             Self::Database(error) => write!(formatter, "{error}"),
             Self::InvalidBindAddr => formatter.write_str("OSEDUC_BIND_ADDR is invalid"),
+            Self::MissingAdminToken => {
+                formatter.write_str("OSEDUC_ADMIN_TOKEN is required when admin seed is enabled")
+            }
             Self::Llm(error) => write!(formatter, "{error}"),
         }
     }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post, put},
     Json, Router,
@@ -13,6 +13,7 @@ use oseduc_core::{
     RecordProgressRequest, SafetyFlag, SourceReference, StudentNodeProgress, StudentProfile,
     TutorChatRequest, TutorContextChunk, TutorResponse, UpsertStudentProfileRequest,
 };
+use oseduc_llm::SecretString;
 use oseduc_llm::{LlmError, LlmGateway};
 use oseduc_policy::recommend_learning_path;
 use oseduc_store::{KnowledgeSeed, KnowledgeSeedSummary, PostgresStore, StoreError};
@@ -26,6 +27,7 @@ pub struct AppState {
     pub public_config: PublicConfig,
     pub knowledge: Arc<dyn KnowledgeCatalog>,
     pub admin_seed_enabled: bool,
+    pub admin_token: Option<SecretString>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -210,12 +212,20 @@ async fn list_sources(
 
 async fn seed_knowledge(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<KnowledgeSeedSummary>, AppError> {
     if !state.admin_seed_enabled {
         return Err(AppError::new(
             StatusCode::NOT_FOUND,
             "not_found",
             "admin seed endpoint is disabled",
+        ));
+    }
+    if !is_authorized_admin_request(&headers, state.admin_token.as_ref()) {
+        return Err(AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin authorization is required",
         ));
     }
     let seed = KnowledgeSeed::from_json_str(RCORE_V3_RUST_SEED)
@@ -399,6 +409,17 @@ struct ErrorResponse {
 
 const RCORE_V3_RUST_SEED: &str = include_str!("../../../data/knowledge/rcore-v3-rust-seed.json");
 
+fn is_authorized_admin_request(headers: &HeaderMap, token: Option<&SecretString>) -> bool {
+    let Some(token) = token else {
+        return false;
+    };
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .is_some_and(|provided| provided == token.expose_secret())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,6 +450,7 @@ mod tests {
             public_config: PublicConfig::new(&config, &database),
             knowledge: Arc::new(MemoryKnowledgeCatalog),
             admin_seed_enabled,
+            admin_token: admin_seed_enabled.then(|| SecretString::new("admin-token")),
         }
     }
 
@@ -898,7 +920,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn admin_seed_endpoint_imports_builtin_seed_when_enabled() {
+    async fn admin_seed_endpoint_requires_token_when_enabled() {
         let app = build_router(test_state_with_admin_seed(true));
 
         let response = app
@@ -906,6 +928,25 @@ mod tests {
                 Request::builder()
                     .method(Method::POST)
                     .uri("/v1/admin/knowledge/seed")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn admin_seed_endpoint_imports_builtin_seed_when_authorized() {
+        let app = build_router(test_state_with_admin_seed(true));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/v1/admin/knowledge/seed")
+                    .header("authorization", "Bearer admin-token")
                     .body(Body::empty())
                     .expect("request should build"),
             )
