@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
 mod config;
+mod seed;
 
 pub use config::{DatabaseConfig, DatabaseConfigError, SecretDatabaseUrl};
+pub use seed::{KnowledgeSeed, KnowledgeSeedError, KnowledgeSeedSummary};
 
 use sqlx::{postgres::PgPoolOptions, PgPool};
 

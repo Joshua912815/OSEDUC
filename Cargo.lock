@@ -946,6 +946,9 @@ dependencies = [
 name = "oseduc-store"
 version = "0.1.0"
 dependencies = [
+ "oseduc-core",
+ "serde",
+ "serde_json",
  "sqlx",
 ]
 

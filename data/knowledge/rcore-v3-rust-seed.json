@@ -1,0 +1,317 @@
+{
+  "sources": [
+    {
+      "id": "rcore-v3-ch1",
+      "title": "rCore-Tutorial-Book-v3 Chapter 1: 应用程序与基本执行环境",
+      "url": "https://rcore-os.cn/rCore-Tutorial-Book-v3/chapter1/index.html",
+      "source_kind": "tutorial_chapter",
+      "license_note": "GPL-3.0. Source copyright is held by the rCore-Tutorial-Book-v3 authors. Use with citation and provenance; do not present derived tutor output as original course text.",
+      "retrieved_at": "2026-06-29T00:00:00Z"
+    },
+    {
+      "id": "rcore-v3-ch2",
+      "title": "rCore-Tutorial-Book-v3 Chapter 2: 批处理系统",
+      "url": "https://rcore-os.cn/rCore-Tutorial-Book-v3/chapter2/index.html",
+      "source_kind": "tutorial_chapter",
+      "license_note": "GPL-3.0. Source copyright is held by the rCore-Tutorial-Book-v3 authors. Use with citation and provenance; do not present derived tutor output as original course text.",
+      "retrieved_at": "2026-06-29T00:00:00Z"
+    },
+    {
+      "id": "rcore-v3-ch3",
+      "title": "rCore-Tutorial-Book-v3 Chapter 3: 多道程序与分时多任务",
+      "url": "https://rcore-os.cn/rCore-Tutorial-Book-v3/chapter3/index.html",
+      "source_kind": "tutorial_chapter",
+      "license_note": "GPL-3.0. Source copyright is held by the rCore-Tutorial-Book-v3 authors. Use with citation and provenance; do not present derived tutor output as original course text.",
+      "retrieved_at": "2026-06-29T00:00:00Z"
+    },
+    {
+      "id": "rcore-v3-ch4",
+      "title": "rCore-Tutorial-Book-v3 Chapter 4: 地址空间",
+      "url": "https://rcore-os.cn/rCore-Tutorial-Book-v3/chapter4/index.html",
+      "source_kind": "tutorial_chapter",
+      "license_note": "GPL-3.0. Source copyright is held by the rCore-Tutorial-Book-v3 authors. Use with citation and provenance; do not present derived tutor output as original course text.",
+      "retrieved_at": "2026-06-29T00:00:00Z"
+    },
+    {
+      "id": "rcore-v3-ch5",
+      "title": "rCore-Tutorial-Book-v3 Chapter 5: 进程及进程管理",
+      "url": "https://rcore-os.cn/rCore-Tutorial-Book-v3/chapter5/index.html",
+      "source_kind": "tutorial_chapter",
+      "license_note": "GPL-3.0. Source copyright is held by the rCore-Tutorial-Book-v3 authors. Use with citation and provenance; do not present derived tutor output as original course text.",
+      "retrieved_at": "2026-06-29T00:00:00Z"
+    },
+    {
+      "id": "rcore-v3-ch6",
+      "title": "rCore-Tutorial-Book-v3 Chapter 6: 文件系统与I/O重定向",
+      "url": "https://rcore-os.cn/rCore-Tutorial-Book-v3/chapter6/index.html",
+      "source_kind": "tutorial_chapter",
+      "license_note": "GPL-3.0. Source copyright is held by the rCore-Tutorial-Book-v3 authors. Use with citation and provenance; do not present derived tutor output as original course text.",
+      "retrieved_at": "2026-06-29T00:00:00Z"
+    },
+    {
+      "id": "rcore-v3-ch7",
+      "title": "rCore-Tutorial-Book-v3 Chapter 7: 进程间通信",
+      "url": "https://rcore-os.cn/rCore-Tutorial-Book-v3/chapter7/index.html",
+      "source_kind": "tutorial_chapter",
+      "license_note": "GPL-3.0. Source copyright is held by the rCore-Tutorial-Book-v3 authors. Use with citation and provenance; do not present derived tutor output as original course text.",
+      "retrieved_at": "2026-06-29T00:00:00Z"
+    },
+    {
+      "id": "rcore-v3-ch8",
+      "title": "rCore-Tutorial-Book-v3 Chapter 8: 并发",
+      "url": "https://rcore-os.cn/rCore-Tutorial-Book-v3/chapter8/index.html",
+      "source_kind": "tutorial_chapter",
+      "license_note": "GPL-3.0. Source copyright is held by the rCore-Tutorial-Book-v3 authors. Use with citation and provenance; do not present derived tutor output as original course text.",
+      "retrieved_at": "2026-06-29T00:00:00Z"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "ch1-app-execution-environment",
+      "title": "应用程序与基本执行环境",
+      "chapter": "chapter1",
+      "kind": "rust_os_mainline",
+      "summary": "建立裸机 Rust 内核的最小执行环境，理解应用程序、内核入口、SBI 输出和退出路径之间的关系。",
+      "learning_objectives": [
+        "说明 no_std 环境为什么需要重新建立运行时入口和 panic 路径",
+        "区分应用程序、内核、SBI 和硬件平台在启动链路中的职责",
+        "理解最小内核如何输出信息并安全退出模拟器"
+      ],
+      "common_misconceptions": [
+        "把标准库运行时当成裸机环境默认存在",
+        "把 SBI 服务误认为内核自身实现的设备驱动",
+        "只关注 Rust 语法而忽略链接脚本和入口地址"
+      ],
+      "source_id": "rcore-v3-ch1"
+    },
+    {
+      "id": "ch2-batch-system",
+      "title": "批处理系统与特权级切换",
+      "chapter": "chapter2",
+      "kind": "rust_os_mainline",
+      "summary": "从单一应用推进到批处理执行，围绕 RISC-V 特权级、系统调用和 trap 机制建立用户态与内核态边界。",
+      "learning_objectives": [
+        "解释用户态和内核态为什么需要硬件特权级隔离",
+        "描述系统调用、异常和中断如何通过 trap 进入内核",
+        "理解批处理系统如何加载并顺序运行多个应用"
+      ],
+      "common_misconceptions": [
+        "认为系统调用只是普通函数调用",
+        "忽略 trap 上下文保存与恢复的必要性",
+        "把批处理调度误解为真正的并发执行"
+      ],
+      "source_id": "rcore-v3-ch2"
+    },
+    {
+      "id": "ch3-task-switching",
+      "title": "多道程序与任务切换",
+      "chapter": "chapter3",
+      "kind": "rust_os_mainline",
+      "summary": "引入任务控制块、上下文切换和调度策略，让多个应用能够以协作式或抢占式方式共享处理器。",
+      "learning_objectives": [
+        "说明任务上下文与 trap 上下文的区别",
+        "解释任务切换为什么需要保存寄存器和栈状态",
+        "比较协作式调度和抢占式调度的触发条件"
+      ],
+      "common_misconceptions": [
+        "把任务切换等同于函数返回",
+        "认为时间片调度不需要时钟中断支持",
+        "忽略任务状态机对调度正确性的约束"
+      ],
+      "source_id": "rcore-v3-ch3"
+    },
+    {
+      "id": "ch4-address-space",
+      "title": "地址空间与页表",
+      "chapter": "chapter4",
+      "kind": "rust_os_mainline",
+      "summary": "通过虚拟内存、页表和地址空间隔离，把应用之间以及应用与内核之间的内存访问边界显式化。",
+      "learning_objectives": [
+        "区分虚拟地址、物理地址和页表项权限",
+        "说明地址空间如何支持应用隔离和内核保护",
+        "理解页表切换与任务切换之间的关系"
+      ],
+      "common_misconceptions": [
+        "认为虚拟地址只是物理地址的别名",
+        "忽略页表权限位对安全边界的作用",
+        "把内核地址空间和用户地址空间混为一谈"
+      ],
+      "source_id": "rcore-v3-ch4"
+    },
+    {
+      "id": "ch5-process",
+      "title": "进程及进程管理",
+      "chapter": "chapter5",
+      "kind": "rust_os_mainline",
+      "summary": "在任务抽象之上加入进程、fork/exec/wait、资源继承与回收，形成接近 Unix 的进程管理模型。",
+      "learning_objectives": [
+        "解释进程相对于任务增加了哪些资源边界",
+        "描述 fork、exec 和 wait 的语义差异",
+        "理解父子进程关系和退出回收的必要性"
+      ],
+      "common_misconceptions": [
+        "把 fork 理解成只复制一段代码",
+        "认为 exec 会创建一个新进程而不是替换当前进程映像",
+        "忽略僵尸进程和资源回收问题"
+      ],
+      "source_id": "rcore-v3-ch5"
+    },
+    {
+      "id": "ch6-file-system",
+      "title": "文件系统与 I/O 重定向",
+      "chapter": "chapter6",
+      "kind": "rust_os_mainline",
+      "summary": "把持久化存储、文件描述符和标准输入输出纳入进程资源模型，使应用能够通过统一接口访问数据流。",
+      "learning_objectives": [
+        "说明文件描述符如何把进程与文件或设备连接起来",
+        "理解 inode、目录项和数据块在简化文件系统中的分工",
+        "解释 I/O 重定向为什么可以复用统一的 read/write 接口"
+      ],
+      "common_misconceptions": [
+        "把文件描述符误认为文件内容本身",
+        "忽略打开文件表和底层文件对象之间的间接关系",
+        "认为标准输入输出是特殊语法而不是普通描述符约定"
+      ],
+      "source_id": "rcore-v3-ch6"
+    },
+    {
+      "id": "ch7-ipc-io-redirection",
+      "title": "进程间通信与管道",
+      "chapter": "chapter7",
+      "kind": "rust_os_mainline",
+      "summary": "用管道等机制连接进程，让进程可以通过内核管理的缓冲区传递字节流并组合成更复杂的工作流。",
+      "learning_objectives": [
+        "解释管道为什么需要内核维护缓冲区和读写端状态",
+        "描述生产者和消费者在阻塞读写中的交互",
+        "理解管道和文件描述符如何支撑 shell 风格组合"
+      ],
+      "common_misconceptions": [
+        "认为两个进程可以随意直接读写彼此内存",
+        "忽略管道关闭端口对 EOF 和阻塞行为的影响",
+        "把 IPC 只理解为消息格式而不是同步和资源管理问题"
+      ],
+      "source_id": "rcore-v3-ch7"
+    },
+    {
+      "id": "ch8-concurrency",
+      "title": "并发与同步互斥",
+      "chapter": "chapter8",
+      "kind": "rust_os_mainline",
+      "summary": "在多执行流共享资源时引入互斥锁、信号量和条件变量，处理竞态、阻塞和唤醒等并发问题。",
+      "learning_objectives": [
+        "识别共享状态访问中的竞态条件",
+        "比较互斥锁、信号量和条件变量适合解决的问题",
+        "解释阻塞、唤醒和调度之间的关系"
+      ],
+      "common_misconceptions": [
+        "认为加锁只影响性能而不影响正确性",
+        "把信号量和互斥锁完全等同",
+        "忽略条件变量必须和状态检查配合使用"
+      ],
+      "source_id": "rcore-v3-ch8"
+    }
+  ],
+  "edges": [
+    {
+      "from_node_id": "ch1-app-execution-environment",
+      "to_node_id": "ch2-batch-system",
+      "relation": "prerequisite_for"
+    },
+    {
+      "from_node_id": "ch2-batch-system",
+      "to_node_id": "ch3-task-switching",
+      "relation": "prerequisite_for"
+    },
+    {
+      "from_node_id": "ch3-task-switching",
+      "to_node_id": "ch4-address-space",
+      "relation": "prerequisite_for"
+    },
+    {
+      "from_node_id": "ch4-address-space",
+      "to_node_id": "ch5-process",
+      "relation": "prerequisite_for"
+    },
+    {
+      "from_node_id": "ch5-process",
+      "to_node_id": "ch6-file-system",
+      "relation": "prerequisite_for"
+    },
+    {
+      "from_node_id": "ch6-file-system",
+      "to_node_id": "ch7-ipc-io-redirection",
+      "relation": "prerequisite_for"
+    },
+    {
+      "from_node_id": "ch7-ipc-io-redirection",
+      "to_node_id": "ch8-concurrency",
+      "relation": "prerequisite_for"
+    }
+  ],
+  "retrieval_chunks": [
+    {
+      "id": "chunk-ch1-app-execution-environment",
+      "node_id": "ch1-app-execution-environment",
+      "source_id": "rcore-v3-ch1",
+      "original_summary": "第 1 章对应最小 Rust OS 执行环境主线：no_std、入口、链接、SBI 输出和退出。",
+      "teaching_context": "Use this as rCore-grounded teaching context for Chapter 1. The student is moving from normal application development to a bare-metal Rust kernel. Emphasize that the standard library and operating-system services are absent, so the kernel must define its own entry path, panic behavior, memory layout assumptions, and minimal interaction with the machine through SBI. Explain startup as a chain of responsibility: firmware prepares the machine, the boot path reaches the kernel entry, the kernel sets up enough runtime support to call Rust code, and SBI calls provide early console output and shutdown while real drivers are not yet implemented.",
+      "citation_label": "rCore v3 ch1"
+    },
+    {
+      "id": "chunk-ch2-batch-system",
+      "node_id": "ch2-batch-system",
+      "source_id": "rcore-v3-ch2",
+      "original_summary": "第 2 章对应批处理系统、RISC-V 特权级、系统调用和 trap 处理主线。",
+      "teaching_context": "Use this as rCore-grounded teaching context for Chapter 2. The key learning move is from a single trusted kernel program to untrusted user applications. Explain why RISC-V privilege levels create a hardware boundary, why user code cannot directly perform privileged operations, and how system calls cross into the kernel through trap handling. The batch system should be presented as a controlled sequence: load one application, enter user mode, catch traps for system calls or faults, return or terminate, then advance to the next application.",
+      "citation_label": "rCore v3 ch2"
+    },
+    {
+      "id": "chunk-ch3-task-switching",
+      "node_id": "ch3-task-switching",
+      "source_id": "rcore-v3-ch3",
+      "original_summary": "第 3 章对应多道程序、任务控制块、上下文切换、协作式调度和抢占式调度。",
+      "teaching_context": "Use this as rCore-grounded teaching context for Chapter 3. The main idea is that the kernel now preserves multiple runnable computations instead of finishing one program before starting another. Explain a task as kernel-managed state: saved registers, stack position, address-related metadata from later chapters, and scheduling state. Distinguish trap context, which captures the user-kernel boundary for one trap, from task context, which lets the scheduler suspend one task and resume another. Then connect timer interrupts to preemption and explain why scheduling policy is separate from the low-level context switch mechanism.",
+      "citation_label": "rCore v3 ch3"
+    },
+    {
+      "id": "chunk-ch4-address-space",
+      "node_id": "ch4-address-space",
+      "source_id": "rcore-v3-ch4",
+      "original_summary": "第 4 章对应地址空间、虚拟内存、页表、页面权限和应用隔离。",
+      "teaching_context": "Use this as rCore-grounded teaching context for Chapter 4. Teach address spaces as the point where memory becomes a protected abstraction rather than a shared flat array. Virtual addresses are interpreted through page tables, and page-table entries carry both translation and permission information. This lets the kernel give each application a private view of memory, map user and kernel regions with different permissions, and reject invalid or unsafe accesses through page faults. Tie this back to task switching: running a different process may require switching the active page table so the same virtual address can mean different physical memory in different contexts.",
+      "citation_label": "rCore v3 ch4"
+    },
+    {
+      "id": "chunk-ch5-process",
+      "node_id": "ch5-process",
+      "source_id": "rcore-v3-ch5",
+      "original_summary": "第 5 章对应进程抽象、fork/exec/wait、父子关系、退出和资源回收。",
+      "teaching_context": "Use this as rCore-grounded teaching context for Chapter 5. Present a process as more than a scheduled task: it owns an address space, resource handles, parent-child relationships, and lifecycle state. Explain fork as creating a new process that starts from a related execution image, exec as replacing the current process image with a new program, and wait as the synchronization and cleanup point for child termination. Stress that process management is also resource management: exit status, reclaimed memory, file descriptors, and avoiding unreaped terminated children are all part of the abstraction.",
+      "citation_label": "rCore v3 ch5"
+    },
+    {
+      "id": "chunk-ch6-file-system",
+      "node_id": "ch6-file-system",
+      "source_id": "rcore-v3-ch6",
+      "original_summary": "第 6 章对应文件系统、文件描述符、标准输入输出和 I/O 重定向。",
+      "teaching_context": "Use this as rCore-grounded teaching context for Chapter 6. The chapter should be taught as the step where processes stop communicating only through registers and memory and start using persistent named data and byte-stream interfaces. Explain files through layered objects: directory entries name files, inodes describe metadata and block locations, and file descriptors give each process small integer handles to opened resources. I/O redirection follows naturally because standard input, standard output, pipes, and files can be accessed through the same read/write style interface once descriptors are installed in the process table.",
+      "citation_label": "rCore v3 ch6"
+    },
+    {
+      "id": "chunk-ch7-ipc-io-redirection",
+      "node_id": "ch7-ipc-io-redirection",
+      "source_id": "rcore-v3-ch7",
+      "original_summary": "第 7 章对应进程间通信、管道、生产者消费者式读写和基于描述符的组合。",
+      "teaching_context": "Use this as rCore-grounded teaching context for Chapter 7. The main concept is that independent processes need kernel-mediated communication because direct memory sharing would break isolation. A pipe is a bounded byte buffer with read and write endpoints represented as file descriptors. Teach blocking behavior as a correctness feature: readers may wait for data, writers may wait for buffer space, and closing endpoints changes whether reads see end-of-file or writes fail. Connect this to shell pipelines, where descriptor inheritance and redirection let separate programs form one data-processing workflow.",
+      "citation_label": "rCore v3 ch7"
+    },
+    {
+      "id": "chunk-ch8-concurrency",
+      "node_id": "ch8-concurrency",
+      "source_id": "rcore-v3-ch8",
+      "original_summary": "第 8 章对应并发控制、互斥锁、信号量、条件变量和典型同步问题。",
+      "teaching_context": "Use this as rCore-grounded teaching context for Chapter 8. The student should see concurrency as simultaneous progress over shared state, not merely faster execution. Explain race conditions with the idea that interleavings can expose partially updated state. A mutex protects a critical section with exclusive access; a semaphore counts available resources or permits; a condition variable lets a thread sleep until shared state satisfies a predicate and must be used with rechecking. Always tie synchronization primitives back to scheduler behavior: blocking removes a task from immediate execution, wakeup makes it runnable, and incorrect ordering can cause lost wakeups or deadlock.",
+      "citation_label": "rCore v3 ch8"
+    }
+  ]
+}
