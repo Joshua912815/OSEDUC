@@ -1,0 +1,9 @@
+# Local reference repositories. Keep these available for inspection, but do not
+# vendor third-party/reference material into this project repository.
+spec-driven-rust-os/
+spec-driven-c-os/
+fm-agent-tgrcore-reproduction/
+
+# Backup of interrupted/partial reference clone attempts.
+.reference-copy-backup-from-slow-clone/
+
