@@ -5,8 +5,9 @@ currently bootstrapping a Rust-first backend for knowledge-graph-guided OS
 learning and controlled LLM tutor experiences.
 
 See [PROPOSAL.md](PROPOSAL.md) for the product proposal and
-[REFERENCE_CREDITS.md](REFERENCE_CREDITS.md) for reference repository license
-and academic integrity rules.
+[docs/DESIGN_DRAFT.md](docs/DESIGN_DRAFT.md) for the current handoff design
+draft. See [REFERENCE_CREDITS.md](REFERENCE_CREDITS.md) for reference repository
+license and academic integrity rules.
 
 ## Current Backend
 
